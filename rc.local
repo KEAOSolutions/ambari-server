@@ -1,0 +1,44 @@
+#!/bin/bash
+
+if [[ -f /etc/secrets/pgpassword ]]
+then
+  export PGPASSWORD=$(cat /etc/secrets/pgpassword)
+else
+  export PGPASSWORD=docker
+fi
+
+if [[ -f /etc/secrets/ambaripgpassword ]]
+then
+  export AMBARIPGPASSWORD=$(cat /etc/secrets/ambaripgpassword)
+else
+  export AMBARIPGPASSWORD=ambari
+fi
+
+if [[ -f /etc/secrets/postgresurl ]]
+then
+  export POSTGRES_URL=$(cat /etc/secrets/postgresurl)
+else
+  export POSTGRES_URL=postgres
+fi
+
+if [[ -f /etc/secrets/postgresuser ]]
+then
+  export POSTGRES_USER=$(cat /etc/secrets/postgresuser)
+else
+  export POSTGRES_USER=docker
+fi
+
+if [[ ! -e /var/lib/pgsql/9.5/data/PG_VERSION ]]
+then
+  PGPASSWORD=${PGPASSWORD} createuser -d --no-superuser -h ${POSTGRES_URL} -U ${POSTGRES_USER} ambari
+  PGPASSWORD=${PGPASSWORD} psql -h ${POSTGRES_URL} -U ${POSTGRES_USER} postgres --command "ALTER USER ambari WITH PASSWORD '${AMBARIPGPASSWORD}';"
+  PGPASSWORD=${AMBARIPGPASSWORD} createdb -E 'UTF-8' -O ambari -h ${POSTGRES_URL} -U ambari ambari
+  PGPASSWORD=${PGPASSWORD} psql -h ${POSTGRES_URL} -U ${POSTGRES_USER} postgres --command "ALTER ROLE ambari WITH NOCREATEDB;"
+  PGPASSWORD=${AMBARIPGPASSWORD} psql -h ${POSTGRES_URL} -U ambari ambari -c "CREATE SCHEMA ambari AUTHORIZATION ambari;"
+  PGPASSWORD=${AMBARIPGPASSWORD} psql -h ${POSTGRES_URL} -U ambari ambari -c "ALTER SCHEMA ambari OWNER TO ambari;"
+  PGPASSWORD=${AMBARIPGPASSWORD} psql -h ${POSTGRES_URL} -U ambari ambari -c "ALTER ROLE ambari SET search_path to 'ambari','public';"
+  PGPASSWORD=${AMBARIPGPASSWORD} psql -h ${POSTGRES_URL} -U ambari ambari < /var/lib/ambari-server/resources/Ambari-DDL-Postgres-CREATE.sql
+  ambari-server setup -s --database=postgres --databasehost=${POSTGRES_URL} --databaseport=5432 --databasename=ambari --databaseusername=ambari --databasepassword=${AMBARIPGPASSWORD} --java-home=/usr/lib/jvm/java-1.8.0-openjdk
+  ambari-server setup -s --jdbc-db=postgres --jdbc-driver=/usr/share/java/postgresql-jdbc.jar
+  ambari-server start
+fi
